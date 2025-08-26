@@ -3,8 +3,24 @@
   "WorkspaceRootPath": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|e:\\nour eldeen\\study\\self study\\github\\onboarding bot\\services\\storyservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|solutionrelative:services\\storyservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|e:\\nour eldeen\\study\\self study\\github\\onboarding bot\\services\\discordbotservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|solutionrelative:services\\discordbotservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|e:\\nour eldeen\\study\\self study\\github\\onboarding bot\\handlers\\onboardinghandler.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|solutionrelative:handlers\\onboardinghandler.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|e:\\nour eldeen\\study\\self study\\github\\onboarding bot\\services\\onboardingservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|solutionrelative:services\\onboardingservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|e:\\nour eldeen\\study\\self study\\github\\onboarding bot\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D0835EFB-BE42-4EBD-9CE8-1E2F74508127}|Onboardingbot.csproj|solutionrelative:program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
   "DocumentGroupContainers": [
@@ -19,12 +35,63 @@
             {
               "$type": "Document",
               "DocumentIndex": 0,
+              "Title": "StoryService.cs",
+              "DocumentMoniker": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Services\\StoryService.cs",
+              "RelativeDocumentMoniker": "Services\\StoryService.cs",
+              "ToolTip": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Services\\StoryService.cs",
+              "RelativeToolTip": "Services\\StoryService.cs",
+              "ViewState": "AgIAAK4AAAAAAAAAAAAqwMcAAAANAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-08-25T15:02:53.369Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "Program.cs",
+              "DocumentMoniker": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Program.cs",
+              "RelativeDocumentMoniker": "Program.cs",
+              "ToolTip": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Program.cs",
+              "RelativeToolTip": "Program.cs",
+              "ViewState": "AgIAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-08-25T14:25:37.584Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "DiscordBotService.cs",
+              "DocumentMoniker": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Services\\DiscordBotService.cs",
+              "RelativeDocumentMoniker": "Services\\DiscordBotService.cs",
+              "ToolTip": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Services\\DiscordBotService.cs*",
+              "RelativeToolTip": "Services\\DiscordBotService.cs*",
+              "ViewState": "AgIAAM4CAAAAAAAAAAAiwOUCAAARAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-08-25T14:25:34.76Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "OnboardingHandler.cs",
+              "DocumentMoniker": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Handlers\\OnboardingHandler.cs",
+              "RelativeDocumentMoniker": "Handlers\\OnboardingHandler.cs",
+              "ToolTip": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Handlers\\OnboardingHandler.cs",
+              "RelativeToolTip": "Handlers\\OnboardingHandler.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAADoAAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-08-25T14:25:10.203Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
               "Title": "OnboardingService.cs",
               "DocumentMoniker": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Services\\OnboardingService.cs",
               "RelativeDocumentMoniker": "Services\\OnboardingService.cs",
               "ToolTip": "E:\\Nour Eldeen\\Study\\Self Study\\GitHub\\Onboarding bot\\Services\\OnboardingService.cs",
               "RelativeToolTip": "Services\\OnboardingService.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAACsAAAAUAAAAAAAAAA==",
+              "ViewState": "AgIAAIgAAAAAAAAAAAAAACgAAAA5AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2025-08-24T21:14:52.181Z",
               "EditorCaption": ""

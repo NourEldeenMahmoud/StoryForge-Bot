@@ -86,3 +86,4 @@ E:\Nour Eldeen\Study\Self Study\GitHub\Onboarding bot\obj\Debug\net8.0\refint\On
 E:\Nour Eldeen\Study\Self Study\GitHub\Onboarding bot\obj\Debug\net8.0\Onboardingbot.pdb
 E:\Nour Eldeen\Study\Self Study\GitHub\Onboarding bot\obj\Debug\net8.0\Onboardingbot.genruntimeconfig.cache
 E:\Nour Eldeen\Study\Self Study\GitHub\Onboarding bot\obj\Debug\net8.0\ref\Onboardingbot.dll
+E:\Nour Eldeen\Study\Self Study\GitHub\Onboarding bot\obj\Debug\net8.0\staticwebassets.upToDateCheck.txt

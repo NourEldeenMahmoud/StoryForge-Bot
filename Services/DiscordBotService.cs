@@ -214,19 +214,9 @@ namespace Onboarding_bot.Services
 
                 // Track invite usage immediately when user joins
                 await TrackInviteUsageAsync(user);
-                
-                // Check if user has existing story in story channel
-                var hasExistingStory = await CheckExistingStoryAsync(user);
-                if (hasExistingStory)
-                {
-                    await HandleExistingUserAsync(user);
-                    return;
-                }
-
-                // For new users, just add Outsider role - DON'T start onboarding automatically
+              
+                // For new users,DON'T start onboarding automatically
                 // Onboarding only starts when user types /join command
-                await UpdateUserRolesAsync(user, removeOutsider: false, addOutsider: true);
-                _logger.LogInformation("[UserJoined] Added Outsider role to new user {Username}. Waiting for /join command.", user.Username);
             }
             catch (Exception ex)
             {
@@ -303,106 +293,50 @@ namespace Onboarding_bot.Services
                 }
 
                 var storyChannel = _client.GetChannel(storyChannelId) as IMessageChannel;
-                
                 if (storyChannel == null)
                 {
                     _logger.LogWarning("[CheckStory] Story channel not found: {ChannelId}", storyChannelId);
                     return false;
                 }
 
-                // IMPROVED: Check more messages and use better search strategy
+                // Get latest 200 messages
                 var messages = await storyChannel.GetMessagesAsync(200).FlattenAsync();
-                _logger.LogInformation("[CheckStory] Checking {MessageCount} messages in story channel for user {Username}", messages.Count(), user.Username);
-                
-                // IMPROVED: Better search strategy
-                var hasExistingStory = messages.Any(message => 
+                _logger.LogInformation("[CheckStory] Checking {MessageCount} messages in story channel for user {Username}",
+                    messages.Count(), user.Username);
+
+                // Search strategy
+                var hasExistingStory = messages.Any(message =>
                 {
-                    // Check if user is mentioned in the message (most reliable)
+                    // Mentions
                     if (message.MentionedUserIds.Contains(user.Id))
                     {
-                        _logger.LogInformation("[CheckStory] Found existing story for user {Username} by mention in message {MessageId}", 
+                        _logger.LogInformation("[CheckStory] Found existing story for user {Username} by mention in message {MessageId}",
                             user.Username, message.Id);
                         return true;
                     }
-                    
-                    // Check if the message is an embed and contains user info
-                    if (message.Embeds.Count > 0)
+
+                    // Embeds
+                    foreach (var embed in message.Embeds)
                     {
-                        foreach (var embed in message.Embeds)
+                        if (embed.Footer.HasValue && !string.IsNullOrEmpty(embed.Footer.Value.Text) &&
+                            embed.Footer.Value.Text.Contains($"UserId:{user.Id}", StringComparison.OrdinalIgnoreCase))
                         {
-                            // Check embed title
-                            if (!string.IsNullOrEmpty(embed.Title) && 
-                                (embed.Title.Contains(user.Username) || 
-                                 (user.Nickname != null && embed.Title.Contains(user.Nickname))))
-                            {
-                                _logger.LogInformation("[CheckStory] Found existing story for user {Username} by embed title in message {MessageId}", 
-                                    user.Username, message.Id);
-                                return true;
-                            }
-                            
-                            // Check embed description
-                            if (!string.IsNullOrEmpty(embed.Description) && 
-                                (embed.Description.Contains(user.Username) || 
-                                 (user.Nickname != null && embed.Description.Contains(user.Nickname))))
-                            {
-                                _logger.LogInformation("[CheckStory] Found existing story for user {Username} by embed description in message {MessageId}", 
-                                    user.Username, message.Id);
-                                return true;
-                            }
-                            
-                            // Check embed footer
-                            if (embed.Footer.HasValue && !string.IsNullOrEmpty(embed.Footer.Value.Text) && 
-                                (embed.Footer.Value.Text.Contains(user.Username) || 
-                                 (user.Nickname != null && embed.Footer.Value.Text.Contains(user.Nickname))))
-                            {
-                                _logger.LogInformation("[CheckStory] Found existing story for user {Username} by embed footer in message {MessageId}", 
-                                    user.Username, message.Id);
-                                return true;
-                            }
-                        }
-                    }
-                    
-                    // Check if the message content contains the user's name or username
-                    if (!string.IsNullOrEmpty(message.Content))
-                    {
-                        var content = message.Content.ToLowerInvariant();
-                        var username = user.Username.ToLowerInvariant();
-                        var nickname = (user.Nickname ?? "").ToLowerInvariant();
-                        
-                        if (content.Contains(username) || (!string.IsNullOrEmpty(nickname) && content.Contains(nickname)))
-                        {
-                            _logger.LogInformation("[CheckStory] Found existing story for user {Username} by name match in message {MessageId}", 
-                                user.Username, message.Id);
+                            _logger.LogInformation("[CheckStory] Found existing story for user {UserId} by embed footer in message {MessageId}",
+                                user.Id, message.Id);
                             return true;
                         }
                     }
-                    
+
                     return false;
                 });
-                
+
                 if (hasExistingStory)
                 {
                     _logger.LogInformation("[CheckStory] User {Username} has existing story - considered OLD member", user.Username);
                     return true;
                 }
-                
-                // FALLBACK: Check if user has a story saved in JSON file
-                try
-                {
-                    var storyService = _onboardingHandler.GetStoryService();
-                    var savedStory = storyService.LoadStory(user.Id);
-                    if (!string.IsNullOrEmpty(savedStory))
-                    {
-                        _logger.LogInformation("[CheckStory] Found existing story for user {Username} in JSON file - considered OLD member", user.Username);
-                        return true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "[CheckStory] Failed to check JSON file for user {Username}", user.Username);
-                }
-                
-                _logger.LogInformation("[CheckStory] No existing story found for user {Username} in story channel or JSON file. User is considered NEW.", user.Username);
+
+                // لو مفيش أي قصة موجودة
                 return false;
             }
             catch (Exception ex)
@@ -431,6 +365,7 @@ namespace Onboarding_bot.Services
                     .WithDescription("انته عضو قديم في العائلة… welcome back\n Role : Associate .")
                     .WithColor(Color.Green)
                     .WithTimestamp(DateTimeOffset.UtcNow)
+                    .WithFooter(footer => footer.Text = $"UserId:{user.Id}")
                     .Build();
 
                     await channel.SendMessageAsync(embed: embed);
@@ -449,7 +384,7 @@ namespace Onboarding_bot.Services
                             .WithColor(Color.Green)
                             .WithThumbnailUrl(user.GetAvatarUrl() ?? "")
                             .WithTimestamp(DateTimeOffset.UtcNow)
-                            .WithFooter(footer => footer.Text = "🟢 عضو قديم")
+                            .WithFooter(footer => footer.Text = $"UserId:{user.Id}")
                             .Build();
 
                         await storyChannel.SendMessageAsync(embed: storyEmbed);
