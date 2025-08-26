@@ -225,60 +225,69 @@ namespace Onboarding_bot.Services
         }
 
         // NEW: Improved invite tracking method
-        private async Task TrackInviteUsageAsync(SocketGuildUser user)
+private async Task TrackInviteUsageAsync(SocketGuildUser user)
+{
+    try
+    {
+        var guild = user.Guild;
+
+        if (!_inviteCache.ContainsKey(guild.Id))
         {
-            try
+            _logger.LogWarning("[InviteTracking] No cached invites for {GuildName}, initializing...", guild.Name);
+            var invites = await guild.GetInvitesAsync();
+            _inviteCache[guild.Id] = invites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
+            return;
+        }
+
+        // Delay عشان يدي Discord فرصة يحدث ال Uses
+        await Task.Delay(1000);
+
+        var oldInvites = _inviteCache[guild.Id];
+        var newInvites = await guild.GetInvitesAsync();
+        string? usedCode = null;
+
+        foreach (var invite in newInvites)
+        {
+            var oldUses = oldInvites.GetValueOrDefault(invite.Code, 0);
+            var newUses = invite.Uses ?? 0;
+
+            if (newUses > oldUses)
             {
-                var guild = user.Guild;
-                
-                // Check if we have cached invites for this guild
-                if (!_inviteCache.ContainsKey(guild.Id))
-                {
-                    _logger.LogWarning("[InviteTracking] No cached invites found for guild {GuildName}. Initializing...", guild.Name);
-                    var invites = await guild.GetInvitesAsync();
-                    _inviteCache[guild.Id] = invites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
-                    return;
-                }
-
-                var oldInvites = _inviteCache[guild.Id];
-                var newInvites = await guild.GetInvitesAsync();
-                string? usedCode = null;
-
-                foreach (var invite in newInvites)
-                {
-                    if (invite.Code == null) continue;
-                    
-                    var oldUses = oldInvites.GetValueOrDefault(invite.Code, 0);
-                    var newUses = invite.Uses ?? 0;
-
-                    if (newUses > oldUses)
-                    {
-                        usedCode = invite.Code;
-                        break;
-                    }
-                }
-
-                if (usedCode != null)
-                {
-                    var usedInvite = newInvites.First(i => i.Code == usedCode);
-                    var inviter = usedInvite.Inviter;
-
-                    _logger.LogInformation("[InviteTracking] {User} joined using invite {Code} created by {Inviter}.",
-                        user.Username, usedCode, inviter?.Username ?? "Unknown");
-                }
-                else
-                {
-                    _logger.LogInformation("[InviteTracking] {User} joined but no matching invite found.", user.Username);
-                }
-
-                // حدّث الكاش
-                _inviteCache[guild.Id] = newInvites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[Error] Failed to track invite usage for user {Username}", user.Username);
+                usedCode = invite.Code;
+                break;
             }
         }
+
+        if (usedCode != null)
+        {
+            var usedInvite = newInvites.First(i => i.Code == usedCode);
+            var inviter = usedInvite.Inviter;
+
+            _logger.LogInformation("[InviteTracking] {User} joined using invite {Code} created by {Inviter}.",
+                user.Username, usedCode, inviter?.Username ?? "Unknown");
+        }
+        else
+        {
+            _logger.LogWarning("[InviteTracking] {User} joined but no matching invite found.", user.Username);
+
+            // Fallback على الـ Audit Log
+            var logs = await guild.GetAuditLogsAsync(5);
+            foreach (var entry in logs)
+            {
+                if (entry.Action == ActionType.MemberJoined && entry.Target.Id == user.Id)
+                {
+                    _logger.LogInformation("[AuditLog] {User} joined via {Inviter}", user.Username, entry.User?.Username);
+                }
+            }
+        }
+
+        _inviteCache[guild.Id] = newInvites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "[Error] Failed to track invite usage for user {Username}", user.Username);
+    }
+}
 
         private async Task<bool> CheckExistingStoryAsync(SocketGuildUser user)
         {
