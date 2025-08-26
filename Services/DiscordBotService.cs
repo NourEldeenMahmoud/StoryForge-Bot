@@ -12,7 +12,7 @@ namespace Onboarding_bot.Services
         private readonly ILogger<DiscordBotService> _logger;
         private readonly OnboardingHandler _onboardingHandler;
         // IMPROVED: Use cache per guild instead of single dictionary
-        private readonly Dictionary<ulong, List<RestInviteMetadata>> _inviteCache = new();
+        private readonly Dictionary<ulong, Dictionary<string, int>> _inviteCache = new();
 
         public DiscordBotService(
             ILogger<DiscordBotService> logger,
@@ -197,7 +197,7 @@ namespace Onboarding_bot.Services
                 _logger.LogInformation("[GuildAvailable] Found {InviteCount} invites in guild {GuildName}", invites.Count, guild.Name);
                 
                 // Cache the invites for this guild
-                _inviteCache[guild.Id] = invites.ToList();
+                _inviteCache[guild.Id] = invites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
                 _logger.LogInformation("[GuildAvailable] Invite cache initialized for guild {GuildName}", guild.Name);
             }
             catch (Exception ex)
@@ -236,44 +236,43 @@ namespace Onboarding_bot.Services
                 {
                     _logger.LogWarning("[InviteTracking] No cached invites found for guild {GuildName}. Initializing...", guild.Name);
                     var invites = await guild.GetInvitesAsync();
-                    _inviteCache[guild.Id] = invites.ToList();
+                    _inviteCache[guild.Id] = invites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
                     return;
                 }
 
                 var oldInvites = _inviteCache[guild.Id];
                 var newInvites = await guild.GetInvitesAsync();
+                string? usedCode = null;
 
-                // Find the invite that was used by this user
-                var usedInvite = newInvites.FirstOrDefault(inv => 
+                foreach (var invite in newInvites)
                 {
-                    var oldInvite = oldInvites.FirstOrDefault(old => old.Code == inv.Code);
-                    if (oldInvite != null)
-                    {
-                        var oldUses = oldInvite.Uses ?? 0;
-                        var newUses = inv.Uses ?? 0;
-                        return newUses > oldUses;
-                    }
-                    return false;
-                });
-
-                if (usedInvite != null)
-                {
-                    var inviterName = usedInvite.Inviter?.Username ?? "Unknown";
-                    var oldInvite = oldInvites.First(old => old.Code == usedInvite.Code);
-                    var oldUses = oldInvite.Uses ?? 0;
-                    var newUses = usedInvite.Uses ?? 0;
+                    if (invite.Code == null) continue;
                     
-                    _logger.LogInformation("[InviteTracking] {Username} joined via invite {Code} from {InviterName} (Uses: {OldUses} → {NewUses})", 
-                        user.Username, usedInvite.Code, inviterName, oldUses, newUses);
+                    var oldUses = oldInvites.GetValueOrDefault(invite.Code, 0);
+                    var newUses = invite.Uses ?? 0;
+
+                    if (newUses > oldUses)
+                    {
+                        usedCode = invite.Code;
+                        break;
+                    }
+                }
+
+                if (usedCode != null)
+                {
+                    var usedInvite = newInvites.First(i => i.Code == usedCode);
+                    var inviter = usedInvite.Inviter;
+
+                    _logger.LogInformation("[InviteTracking] {User} joined using invite {Code} created by {Inviter}.",
+                        user.Username, usedCode, inviter?.Username ?? "Unknown");
                 }
                 else
                 {
-                    _logger.LogInformation("[InviteTracking] {Username} joined without a known invite", user.Username);
+                    _logger.LogInformation("[InviteTracking] {User} joined but no matching invite found.", user.Username);
                 }
 
-                // Update the cache with new invite data
-                _inviteCache[guild.Id] = newInvites.ToList();
-                _logger.LogInformation("[InviteTracking] Updated invite cache for guild {GuildName}", guild.Name);
+                // حدّث الكاش
+                _inviteCache[guild.Id] = newInvites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
             }
             catch (Exception ex)
             {
@@ -628,26 +627,29 @@ namespace Onboarding_bot.Services
 
                 var oldInvites = _inviteCache[guild.Id];
                 var newInvites = await guild.GetInvitesAsync();
+                string? usedCode = null;
 
-                // Find the invite that was used by this user
-                var usedInvite = newInvites.FirstOrDefault(inv => 
+                foreach (var invite in newInvites)
                 {
-                    var oldInvite = oldInvites.FirstOrDefault(old => old.Code == inv.Code);
-                    if (oldInvite != null)
-                    {
-                        var oldUses = oldInvite.Uses ?? 0;
-                        var newUses = inv.Uses ?? 0;
-                        return newUses > oldUses;
-                    }
-                    return false;
-                });
+                    if (invite.Code == null) continue;
+                    
+                    var oldUses = oldInvites.GetValueOrDefault(invite.Code, 0);
+                    var newUses = invite.Uses ?? 0;
 
-                if (usedInvite == null)
+                    if (newUses > oldUses)
+                    {
+                        usedCode = invite.Code;
+                        break;
+                    }
+                }
+
+                if (usedCode == null)
                 {
                     _logger.LogInformation("[InviterInfo] No invite found for user {Username}", user.Username);
                     return ("غير معروف", 0, "بدون رول", "");
                 }
 
+                var usedInvite = newInvites.First(i => i.Code == usedCode);
                 var inviterName = usedInvite.Inviter?.Username ?? "غير معروف";
                 var inviterId = usedInvite.Inviter?.Id ?? 0;
                 string inviterRole = string.Empty;
@@ -672,7 +674,7 @@ namespace Onboarding_bot.Services
                 }
 
                 _logger.LogInformation("[InviterInfo] Final result for {Username}: Inviter={InviterName} ({InviterId}), Role={Role}, UsedInvite={UsedInviteCode}", 
-                    user.Username, inviterName, inviterId, inviterRole, usedInvite.Code);
+                    user.Username, inviterName, inviterId, inviterRole, usedCode);
 
                 return (inviterName, inviterId, inviterRole, inviterStory);
             }
@@ -760,6 +762,6 @@ namespace Onboarding_bot.Services
         }
 
         public DiscordSocketClient GetClient() => _client;
-        public Dictionary<ulong, List<RestInviteMetadata>> GetInviteCache() => _inviteCache;
+        public Dictionary<ulong, Dictionary<string, int>> GetInviteCache() => _inviteCache;
     }
 }

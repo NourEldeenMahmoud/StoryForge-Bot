@@ -6,16 +6,16 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Onboarding_bot.Services;
 using Onboarding_bot.Handlers;
-
-var builder = WebApplication.CreateBuilder(args);
-
+            
+            var builder = WebApplication.CreateBuilder(args);
+            
 // Add services to the container
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
 // Add Logging
-builder.Services.AddLogging();
-
+            builder.Services.AddLogging();
+            
 // Add Discord Socket Client first with proper configuration
 builder.Services.AddSingleton<DiscordSocketClient>(provider =>
 {
