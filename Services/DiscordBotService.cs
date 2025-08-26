@@ -56,6 +56,13 @@ namespace Onboarding_bot.Services
                 {
                     _logger.LogInformation("[Startup] Attempting to connect to Discord (attempt {Attempt}/{MaxAttempts})", retryCount + 1, maxRetries);
                     
+                    // Check if already connected
+                    if (_client.ConnectionState == ConnectionState.Connected)
+                    {
+                        _logger.LogInformation("[Startup] Already connected to Discord");
+                        break;
+                    }
+                    
                     await _client.LoginAsync(TokenType.Bot, token);
                     await _client.StartAsync();
                     
@@ -136,17 +143,18 @@ namespace Onboarding_bot.Services
                     _logger.LogInformation("[Reconnection] Attempting to reconnect to Discord...");
                     
                     // Try to reconnect multiple times
-                    int maxReconnectAttempts = 3;
+                    int maxReconnectAttempts = 5;
                     for (int attempt = 1; attempt <= maxReconnectAttempts; attempt++)
                     {
                         try
                         {
-                            if (_client.ConnectionState == ConnectionState.Disconnected)
-                            {
-                                await _client.StartAsync();
-                                _logger.LogInformation("[Reconnection] Successfully reconnected to Discord on attempt {Attempt}", attempt);
-                                return;
-                            }
+                            _logger.LogInformation("[Reconnection] Attempt {Attempt}/{MaxAttempts} - Current state: {State}", 
+                                attempt, maxReconnectAttempts, _client.ConnectionState);
+                            
+                            // Always try to start, regardless of current state
+                            await _client.StartAsync();
+                            _logger.LogInformation("[Reconnection] Successfully reconnected to Discord on attempt {Attempt}", attempt);
+                            return;
                         }
                         catch (Exception ex)
                         {
@@ -154,13 +162,14 @@ namespace Onboarding_bot.Services
                             
                             if (attempt < maxReconnectAttempts)
                             {
-                                int delaySeconds = Math.Min(10 * attempt, 30); // Exponential backoff with max 30 seconds
+                                int delaySeconds = Math.Min(15 * attempt, 60); // Longer delays with max 1 minute
+                                _logger.LogInformation("[Reconnection] Waiting {Delay} seconds before next attempt...", delaySeconds);
                                 await Task.Delay(delaySeconds * 1000);
                             }
                         }
                     }
                     
-                    _logger.LogError("[Reconnection] Failed to reconnect after {MaxAttempts} attempts", maxReconnectAttempts);
+                    _logger.LogError("[Reconnection] Failed to reconnect after {MaxAttempts} attempts. Bot will remain disconnected.", maxReconnectAttempts);
                 }
                 catch (Exception ex)
                 {
