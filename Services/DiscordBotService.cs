@@ -3,16 +3,21 @@ using Discord.WebSocket;
 using Discord.Rest;
 using Microsoft.Extensions.Logging;
 using Onboarding_bot.Handlers;
+using System.Collections.Concurrent;
+using System;
 
 namespace Onboarding_bot.Services
 {
-    public class DiscordBotService
+    public class DiscordBotService : IDisposable
     {
         private readonly DiscordSocketClient _client;
         private readonly ILogger<DiscordBotService> _logger;
         private readonly OnboardingHandler _onboardingHandler;
-        // IMPROVED: Use cache per guild instead of single dictionary
-        private readonly Dictionary<ulong, Dictionary<string, int>> _inviteCache = new();
+        // IMPROVED: Use TTL cache per guild to reduce API calls (thread-safe)
+        private readonly ConcurrentDictionary<ulong, (DateTime lastUpdate, Dictionary<string, int> invites)> _inviteCache = new();
+        
+        // OPTIMIZATION: Track command registration to avoid duplicates
+        private bool _commandsRegistered = false;
 
         public DiscordBotService(
             ILogger<DiscordBotService> logger,
@@ -47,50 +52,32 @@ namespace Onboarding_bot.Services
 
             SetupEventHandlers();
             
-            // Add retry logic for rate limiting
-            int maxRetries = 5;
-            int retryCount = 0;
-            
-            while (retryCount < maxRetries)
+            // IMPORTANT: Only start once to avoid rate limits
+            if (_client.ConnectionState == ConnectionState.Connected)
             {
-                try
-                {
-                    _logger.LogInformation("[Startup] Attempting to connect to Discord (attempt {Attempt}/{MaxAttempts})", retryCount + 1, maxRetries);
-                    
-                    // Check if already connected
-                    if (_client.ConnectionState == ConnectionState.Connected)
-                    {
-                        _logger.LogInformation("[Startup] Already connected to Discord");
-                        break;
-                    }
-                    
-                    await _client.LoginAsync(TokenType.Bot, token);
-                    await _client.StartAsync();
-                    
-                    _logger.LogInformation("[Startup] Successfully connected to Discord");
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    retryCount++;
-                    _logger.LogWarning(ex, "[Startup] Failed to connect to Discord (attempt {Attempt}/{MaxAttempts})", retryCount, maxRetries);
-                    
-                    if (retryCount < maxRetries)
-                    {
-                        int delaySeconds = Math.Min(30 * retryCount, 120); // Exponential backoff with max 2 minutes
-                        _logger.LogInformation("[Startup] Waiting {Delay} seconds before retry...", delaySeconds);
-                        await Task.Delay(delaySeconds * 1000);
-                    }
-                    else
-                    {
-                        _logger.LogError(ex, "[Startup] Failed to connect to Discord after {MaxAttempts} attempts", maxRetries);
-                        throw;
-                    }
-                }
+                _logger.LogInformation("[Startup] Already connected to Discord, skipping startup");
+                return;
+            }
+            
+            try
+            {
+                _logger.LogInformation("[Startup] Attempting to connect to Discord...");
+                await _client.LoginAsync(TokenType.Bot, token);
+                await _client.StartAsync();
+                _logger.LogInformation("[Startup] Successfully connected to Discord");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Startup] Failed to connect to Discord");
+                throw;
             }
 
-            // Register slash commands
-            await RegisterCommandsAsync();
+            // Register slash commands (only once)
+            if (!_commandsRegistered)
+            {
+                await RegisterCommandsAsync();
+                _commandsRegistered = true;
+            }
         }
 
         private async Task RegisterCommandsAsync()
@@ -107,17 +94,83 @@ namespace Onboarding_bot.Services
 
                 _logger.LogInformation("[Commands] Built join command: {CommandName}", joinCommand.Name);
 
-                foreach (var guild in _client.Guilds)
+                // Configurable command registration strategy
+                var forceGuildOnlyStr = Environment.GetEnvironmentVariable("FORCE_GUILD_ONLY_COMMANDS");
+                var forceGuildOnly = !string.IsNullOrEmpty(forceGuildOnlyStr) && 
+                                   (forceGuildOnlyStr.Equals("true", StringComparison.OrdinalIgnoreCase) || 
+                                    forceGuildOnlyStr.Equals("1", StringComparison.OrdinalIgnoreCase));
+                
+                var guildCount = _client.Guilds.Count;
+                
+                if (forceGuildOnly || guildCount <= 2)
                 {
+                                         // For small servers or when forced, use guild-only registration for faster propagation
+                     var reason = forceGuildOnly ? "forced by environment variable" : "small server setup";
+                     _logger.LogInformation("[Commands] Using guild-only registration ({GuildCount} guilds). Reason: {Reason}", guildCount, reason);
+                    
+                    foreach (var guild in _client.Guilds)
+                    {
+                        try
+                        {
+                            _logger.LogInformation("[Commands] Registering command in guild: {GuildName} ({GuildId})", guild.Name, guild.Id);
+                            await guild.CreateApplicationCommandAsync(joinCommand);
+                            _logger.LogInformation("[Commands] Successfully registered /join command in guild: {GuildName}", guild.Name);
+                            
+                            // Add small delay between guilds
+                            await Task.Delay(500);
+                        }
+                        catch (Exception guildEx)
+                        {
+                            _logger.LogWarning(guildEx, "[Commands] Failed to register command in guild: {GuildName}. Error: {ErrorType}", guild.Name, guildEx.GetType().Name);
+                            
+                            if (guildEx.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _logger.LogError("[RateLimit] Rate limit hit during command registration for guild {GuildName}. Waiting 3 seconds...", guild.Name);
+                                await Task.Delay(3000);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // For larger servers, try global registration first, then fallback to guild-only
                     try
                     {
-                        _logger.LogInformation("[Commands] Registering command in guild: {GuildName} ({GuildId})", guild.Name, guild.Id);
-                        await guild.CreateApplicationCommandAsync(joinCommand);
-                        _logger.LogInformation("[Commands] Successfully registered /join command in guild: {GuildName}", guild.Name);
+                        await _client.CreateGlobalApplicationCommandAsync(joinCommand);
+                        _logger.LogInformation("[Commands] Successfully registered /join command globally for {GuildCount} guilds", guildCount);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "[Commands] Failed to register command in guild: {GuildName}", guild.Name);
+                        _logger.LogWarning(ex, "[Commands] Failed to register command globally. Error: {ErrorType}", ex.GetType().Name);
+                        
+                        // Fallback: Register per guild if global fails
+                        if (ex.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("405"))
+                        {
+                            _logger.LogError("[RateLimit] Rate limit or permission error during global command registration. Using per-guild fallback...");
+                            
+                            foreach (var guild in _client.Guilds)
+                            {
+                                try
+                                {
+                                    _logger.LogInformation("[Commands] Registering command in guild: {GuildName} ({GuildId})", guild.Name, guild.Id);
+                                    await guild.CreateApplicationCommandAsync(joinCommand);
+                                    _logger.LogInformation("[Commands] Successfully registered /join command in guild: {GuildName}", guild.Name);
+                                    
+                                    // Add delay between guilds to avoid rate limits
+                                    await Task.Delay(1000);
+                                }
+                                catch (Exception guildEx)
+                                {
+                                    _logger.LogWarning(guildEx, "[Commands] Failed to register command in guild: {GuildName}. Error: {ErrorType}", guild.Name, guildEx.GetType().Name);
+                                    
+                                    if (guildEx.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        _logger.LogError("[RateLimit] Rate limit hit during command registration for guild {GuildName}. Waiting 5 seconds...", guild.Name);
+                                        await Task.Delay(5000);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -125,7 +178,7 @@ namespace Onboarding_bot.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[Commands] Failed to register slash commands");
+                _logger.LogError(ex, "[Commands] Failed to register slash commands. Error: {ErrorType}", ex.GetType().Name);
             }
         }
 
@@ -165,16 +218,13 @@ namespace Onboarding_bot.Services
             
             try
             {
-                var invites = await guild.GetInvitesAsync();
-                _logger.LogInformation("[GuildAvailable] Found {InviteCount} invites in guild {GuildName}", invites.Count, guild.Name);
-                
-                // Cache the invites for this guild
-                _inviteCache[guild.Id] = invites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
-                _logger.LogInformation("[GuildAvailable] Invite cache initialized for guild {GuildName}", guild.Name);
+                // OPTIMIZATION: Force refresh to get initial snapshot
+                var invites = await GetInvitesWithCacheAsync(guild, forceRefresh: true);
+                _logger.LogInformation("[GuildAvailable] Initialized invite cache for guild {GuildName} with {Count} invites", guild.Name, invites.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[GuildAvailable] Failed to get invites for guild {GuildName}", guild.Name);
+                _logger.LogWarning(ex, "[GuildAvailable] Failed to initialize invites for guild {GuildName}. Error: {ErrorType}", guild.Name, ex.GetType().Name);
             }
         }
 
@@ -196,60 +246,69 @@ namespace Onboarding_bot.Services
             }
         }
 
-        // NEW: Improved invite tracking method
-private async Task TrackInviteUsageAsync(SocketGuildUser user)
-{
-    try
-    {
-        var guild = user.Guild;
-
-        if (!_inviteCache.ContainsKey(guild.Id))
+                // NEW: Improved invite tracking method with TTL caching
+        private async Task TrackInviteUsageAsync(SocketGuildUser user)
         {
-            _logger.LogWarning("[InviteTracking] No cached invites for {GuildName}, initializing...", guild.Name);
-            var invites = await guild.GetInvitesAsync();
-            _inviteCache[guild.Id] = invites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
-            return;
-        }
-
-        // Delay عشان يدي Discord فرصة يحدث ال Uses
-        await Task.Delay(1000);
-
-        var oldInvites = _inviteCache[guild.Id];
-        var newInvites = await guild.GetInvitesAsync();
-        string? usedCode = null;
-
-        foreach (var invite in newInvites)
-        {
-            var oldUses = oldInvites.GetValueOrDefault(invite.Code, 0);
-            var newUses = invite.Uses ?? 0;
-
-            if (newUses > oldUses)
+            try
             {
-                usedCode = invite.Code;
-                break;
+                var guild = user.Guild;
+
+                // OPTIMIZATION: Get old snapshot from cache (without force refresh)
+                var oldInvites = await GetInvitesWithCacheAsync(guild, forceRefresh: false);
+                
+                if (oldInvites.Count == 0)
+                {
+                    _logger.LogWarning("[InviteTracking] No invites found for {GuildName}, skipping tracking", guild.Name);
+                    return;
+                }
+
+                // Configurable delay for Discord to update invite counters (default: 2000ms)
+                var delayStr = Environment.GetEnvironmentVariable("INVITE_TRACKING_DELAY_MS");
+                var delayMs = !string.IsNullOrEmpty(delayStr) && int.TryParse(delayStr, out var delay) ? delay : 2000;
+                
+                _logger.LogInformation("[InviteTracking] Waiting {DelayMs}ms for Discord to update invite counters...", delayMs);
+                await Task.Delay(delayMs);
+
+                // OPTIMIZATION: Force refresh to get new snapshot for comparison
+                var newInvites = await GetInvitesWithCacheAsync(guild, forceRefresh: true);
+                string? usedCode = null;
+
+                foreach (var invite in newInvites)
+                {
+                    if (invite.Key == null) continue;
+                    
+                    var oldUses = oldInvites.GetValueOrDefault(invite.Key, 0);
+                    var newUses = invite.Value;
+
+                    if (newUses > oldUses)
+                    {
+                        usedCode = invite.Key;
+                        _logger.LogInformation("[InviteTracking] Found used invite: {Code} (old: {OldUses}, new: {NewUses})", 
+                            invite.Key, oldUses, newUses);
+                        break;
+                    }
+                }
+
+                if (usedCode != null)
+                {
+                    _logger.LogInformation("[InviteTracking] {User} joined using invite {Code} in guild {GuildName}.",
+                        user.Username, usedCode, guild.Name);
+                }
+                else
+                {
+                    _logger.LogWarning("[InviteTracking] {User} joined but no matching invite found in guild {GuildName}.", user.Username, guild.Name);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Error] Failed to track invite usage for user {Username}. Error: {ErrorType}", user.Username, ex.GetType().Name);
+                
+                if (ex.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogError("[RateLimit] Rate limit hit when tracking invite usage for user {Username}.", user.Username);
+                }
             }
         }
-
-        if (usedCode != null)
-        {
-            var usedInvite = newInvites.First(i => i.Code == usedCode);
-            var inviter = usedInvite.Inviter;
-
-            _logger.LogInformation("[InviteTracking] {User} joined using invite {Code} created by {Inviter}.",
-                user.Username, usedCode, inviter?.Username ?? "Unknown");
-        }
-                 else
-         {
-             _logger.LogWarning("[InviteTracking] {User} joined but no matching invite found.", user.Username);
-         }
-
-        _inviteCache[guild.Id] = newInvites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
-    }
-    catch (Exception ex)
-    {
-        _logger.LogError(ex, "[Error] Failed to track invite usage for user {Username}", user.Username);
-    }
-}
 
         private async Task<bool> CheckExistingStoryAsync(SocketGuildUser user)
         {
@@ -590,26 +649,31 @@ private async Task TrackInviteUsageAsync(SocketGuildUser user)
             {
                 var guild = user.Guild;
                 
-                if (!_inviteCache.ContainsKey(guild.Id))
+                // OPTIMIZATION: Get old snapshot from cache (without force refresh)
+                var oldInvites = await GetInvitesWithCacheAsync(guild, forceRefresh: false);
+                
+                if (oldInvites.Count == 0)
                 {
-                    _logger.LogWarning("[InviterInfo] No cached invites found for guild {GuildName}", guild.Name);
+                    _logger.LogWarning("[InviterInfo] No invites found for guild {GuildName}", guild.Name);
                     return ("غير معروف", 0, "بدون رول", "");
                 }
 
-                var oldInvites = _inviteCache[guild.Id];
-                var newInvites = await guild.GetInvitesAsync();
+                // OPTIMIZATION: Force refresh to get new snapshot for comparison
+                var newInvites = await GetInvitesWithCacheAsync(guild, forceRefresh: true);
                 string? usedCode = null;
 
                 foreach (var invite in newInvites)
                 {
-                    if (invite.Code == null) continue;
+                    if (invite.Key == null) continue;
                     
-                    var oldUses = oldInvites.GetValueOrDefault(invite.Code, 0);
-                    var newUses = invite.Uses ?? 0;
+                    var oldUses = oldInvites.GetValueOrDefault(invite.Key, 0);
+                    var newUses = invite.Value;
 
                     if (newUses > oldUses)
                     {
-                        usedCode = invite.Code;
+                        usedCode = invite.Key;
+                        _logger.LogInformation("[InviterInfo] Found used invite: {Code} (old: {OldUses}, new: {NewUses})", 
+                            invite.Key, oldUses, newUses);
                         break;
                     }
                 }
@@ -620,28 +684,42 @@ private async Task TrackInviteUsageAsync(SocketGuildUser user)
                     return ("غير معروف", 0, "بدون رول", "");
                 }
 
-                var usedInvite = newInvites.First(i => i.Code == usedCode);
-                var inviterName = usedInvite.Inviter?.Username ?? "غير معروف";
-                var inviterId = usedInvite.Inviter?.Id ?? 0;
+                // Get inviter details from the used invite
+                var inviterName = "غير معروف";
+                var inviterId = 0UL;
                 string inviterRole = string.Empty;
                 string inviterStory = string.Empty;
 
-                if (inviterId != 0)
+                // Try to get inviter info from the guild's invite list
+                try
                 {
-                    var inviterUser = guild.GetUser(inviterId);
-                    if (inviterUser != null)
+                    var guildInvites = await guild.GetInvitesAsync();
+                    var usedInvite = guildInvites.FirstOrDefault(i => i.Code == usedCode);
+                    
+                    if (usedInvite?.Inviter != null)
                     {
-                        var topRole = inviterUser.Roles
-                            .Where(r => r.Id != guild.EveryoneRole.Id)
-                            .OrderByDescending(r => r.Position)
-                            .FirstOrDefault();
-                        inviterRole = topRole?.Name ?? "بدون رول";
-
-                        inviterStory = _onboardingHandler.GetStoryService().LoadStory(inviterId) ?? string.Empty;
+                        inviterName = usedInvite.Inviter.Username ?? "غير معروف";
+                        inviterId = usedInvite.Inviter.Id;
                         
-                        _logger.LogInformation("[InviterInfo] Inviter details: {InviterName} ({InviterId}), Role: {Role}, HasStory: {HasStory}", 
-                            inviterName, inviterId, inviterRole, !string.IsNullOrEmpty(inviterStory));
+                        var inviterUser = guild.GetUser(inviterId);
+                        if (inviterUser != null)
+                        {
+                            var topRole = inviterUser.Roles
+                                .Where(r => r.Id != guild.EveryoneRole.Id)
+                                .OrderByDescending(r => r.Position)
+                                .FirstOrDefault();
+                            inviterRole = topRole?.Name ?? "بدون رول";
+
+                            inviterStory = _onboardingHandler.GetStoryService().LoadStory(inviterId) ?? string.Empty;
+                            
+                            _logger.LogInformation("[InviterInfo] Inviter details: {InviterName} ({InviterId}), Role: {Role}, HasStory: {HasStory}", 
+                                inviterName, inviterId, inviterRole, !string.IsNullOrEmpty(inviterStory));
+                        }
                     }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[InviterInfo] Failed to get inviter details for invite {Code}", usedCode);
                 }
 
                 _logger.LogInformation("[InviterInfo] Final result for {Username}: Inviter={InviterName} ({InviterId}), Role={Role}, UsedInvite={UsedInviteCode}", 
@@ -732,7 +810,90 @@ private async Task TrackInviteUsageAsync(SocketGuildUser user)
             }
         }
 
+        // HELPER: Get invites with TTL caching (configurable)
+        private async Task<Dictionary<string, int>> GetInvitesWithCacheAsync(SocketGuild guild, bool forceRefresh = false)
+        {
+            // Configurable TTL from environment variable (default: 60 seconds)
+            var cacheTtlStr = Environment.GetEnvironmentVariable("INVITE_CACHE_TTL_SECONDS");
+            var cacheTtlSeconds = !string.IsNullOrEmpty(cacheTtlStr) && int.TryParse(cacheTtlStr, out var ttl) ? ttl : 60;
+            
+            if (!forceRefresh && _inviteCache.TryGetValue(guild.Id, out var cache) && 
+                (DateTime.UtcNow - cache.lastUpdate).TotalSeconds < cacheTtlSeconds)
+            {
+                _logger.LogDebug("[Cache] Using cached invites for guild {GuildName} (age: {Age}s)", 
+                    guild.Name, (DateTime.UtcNow - cache.lastUpdate).TotalSeconds);
+                return cache.invites;
+            }
+            else
+            {
+                try
+                {
+                    var invites = await guild.GetInvitesAsync();
+                    var inviteDict = invites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
+                    _inviteCache[guild.Id] = (DateTime.UtcNow, inviteDict);
+                    
+                    if (forceRefresh)
+                    {
+                        _logger.LogInformation("[Cache] Force refreshed invite cache for guild {GuildName} with {Count} invites", 
+                            guild.Name, invites.Count);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("[Cache] Updated invite cache for guild {GuildName} with {Count} invites", 
+                            guild.Name, invites.Count);
+                    }
+                    return inviteDict;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[Cache] Failed to fetch invites for guild {GuildName}. Error: {ErrorType}", 
+                        guild.Name, ex.GetType().Name);
+                    
+                    if (ex.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogError("[RateLimit] Rate limit hit when fetching invites for guild {GuildName}.", guild.Name);
+                    }
+                    
+                    // Return empty dict if fetch fails
+                    return new Dictionary<string, int>();
+                }
+            }
+        }
+
         public DiscordSocketClient GetClient() => _client;
-        public Dictionary<ulong, Dictionary<string, int>> GetInviteCache() => _inviteCache;
+        public ConcurrentDictionary<ulong, (DateTime lastUpdate, Dictionary<string, int> invites)> GetInviteCache() => _inviteCache;
+
+        // GRACEFUL SHUTDOWN: Clean up Discord connection
+        public async Task StopAsync()
+        {
+            try
+            {
+                if (_client.ConnectionState == ConnectionState.Connected)
+                {
+                    _logger.LogInformation("[Shutdown] Disconnecting from Discord...");
+                    await _client.StopAsync();
+                    await _client.LogoutAsync();
+                    _logger.LogInformation("[Shutdown] Successfully disconnected from Discord");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Shutdown] Error during Discord disconnect");
+            }
+        }
+
+        // DISPOSE: Clean up resources
+        public void Dispose()
+        {
+            try
+            {
+                _logger.LogInformation("[Dispose] Cleaning up Discord bot resources...");
+                _ = StopAsync(); // Fire and forget
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Dispose] Error during cleanup");
+            }
+        }
     }
 }
