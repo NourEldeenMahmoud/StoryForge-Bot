@@ -266,20 +266,10 @@ private async Task TrackInviteUsageAsync(SocketGuildUser user)
             _logger.LogInformation("[InviteTracking] {User} joined using invite {Code} created by {Inviter}.",
                 user.Username, usedCode, inviter?.Username ?? "Unknown");
         }
-        else
-        {
-            _logger.LogWarning("[InviteTracking] {User} joined but no matching invite found.", user.Username);
-
-            // Fallback على الـ Audit Log
-            var logs = await guild.GetAuditLogsAsync(5);
-            foreach (var entry in logs)
-            {
-                if (entry.Action == ActionType.MemberJoined && entry.Target.Id == user.Id)
-                {
-                    _logger.LogInformation("[AuditLog] {User} joined via {Inviter}", user.Username, entry.User?.Username);
-                }
-            }
-        }
+                 else
+         {
+             _logger.LogWarning("[InviteTracking] {User} joined but no matching invite found.", user.Username);
+         }
 
         _inviteCache[guild.Id] = newInvites.ToDictionary(i => i.Code, i => i.Uses ?? 0);
     }
