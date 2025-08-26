@@ -33,6 +33,7 @@ namespace Onboarding_bot.Services
             _client.MessageReceived += HandleMessageReceivedAsync;
             _client.InteractionCreated += HandleInteractionCreatedAsync;
             _client.Disconnected += DisconnectedAsync;
+            _client.Connected += ConnectedAsync;
         }
 
         public async Task StartAsync()
@@ -130,53 +131,15 @@ namespace Onboarding_bot.Services
 
         private Task DisconnectedAsync(Exception exception)
         {
-            _logger.LogWarning(exception, "[Disconnected] Bot disconnected from Discord");
-            
-            // Don't block the gateway task - use Task.Run for reconnection
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    // Wait a bit before attempting to reconnect
-                    await Task.Delay(5000);
-                    
-                    _logger.LogInformation("[Reconnection] Attempting to reconnect to Discord...");
-                    
-                    // Try to reconnect multiple times
-                    int maxReconnectAttempts = 5;
-                    for (int attempt = 1; attempt <= maxReconnectAttempts; attempt++)
-                    {
-                        try
-                        {
-                            _logger.LogInformation("[Reconnection] Attempt {Attempt}/{MaxAttempts} - Current state: {State}", 
-                                attempt, maxReconnectAttempts, _client.ConnectionState);
-                            
-                            // Always try to start, regardless of current state
-                            await _client.StartAsync();
-                            _logger.LogInformation("[Reconnection] Successfully reconnected to Discord on attempt {Attempt}", attempt);
-                            return;
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "[Reconnection] Failed to reconnect on attempt {Attempt}/{MaxAttempts}", attempt, maxReconnectAttempts);
-                            
-                            if (attempt < maxReconnectAttempts)
-                            {
-                                int delaySeconds = Math.Min(15 * attempt, 60); // Longer delays with max 1 minute
-                                _logger.LogInformation("[Reconnection] Waiting {Delay} seconds before next attempt...", delaySeconds);
-                                await Task.Delay(delaySeconds * 1000);
-                            }
-                        }
-                    }
-                    
-                    _logger.LogError("[Reconnection] Failed to reconnect after {MaxAttempts} attempts. Bot will remain disconnected.", maxReconnectAttempts);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "[Reconnection] Unexpected error during reconnection");
-                }
-            });
-            
+              _logger.LogWarning(exception, 
+        "[Disconnected] State={State}. Bot disconnected from Discord. Waiting for auto-reconnect...", 
+        _client.ConnectionState);
+    return Task.CompletedTask;
+        }
+
+        private Task ConnectedAsync()
+        {
+            _logger.LogInformation("[Reconnected] Bot successfully reconnected to Discord");
             return Task.CompletedTask;
         }
 
