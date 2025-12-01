@@ -1,0 +1,17 @@
+{
+  "Discord": {
+    "StoryChannelId": 0,
+    "CityGatesChannelId": 0,
+    "OutsiderRoleId": 0,
+    "AssociateRoleId": 0,
+    "GuildId": 0
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information"
+    }
+  }
+}
+
